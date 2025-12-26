@@ -3,6 +3,7 @@
 
 import type { User } from "../types/Users";
 import '../App.css';
+import ConnectToServer from "./ConnectToServer";
 
 interface ChatHeaderProps {
   users: User[];
@@ -18,8 +19,8 @@ export default function ChatHeader({
   users,
   currentUserId,
   connectionStatus,
-  typingIndicators,
-  getUsernameById,
+  //typingIndicators,
+  //getUsernameById,
   setCurrentUserId,
   setShowAddUserModal
 }: ChatHeaderProps) {
@@ -45,30 +46,21 @@ export default function ChatHeader({
     }
   };
 
-  const typingUsers = Array.from(typingIndicators.entries())
-    .filter(([_, isTyping]) => isTyping)
-    .map(([userId]) => getUsernameById(userId));
-
   return (
     <header className="app-header">
       <div className="header-content">
         {/* Left Section */}
         <div className="header-left">
           <h1 className="app-title">💬 Chat App</h1>
-
           <div className="status-indicator">
             <span
               className="status-dot"
               style={{ backgroundColor: getStatusColor() }}
             />
             {getStatusText()}
-
-            {typingUsers.length > 0 && (
-              <span className="typing-status">
-                • {typingUsers.join(", ")} {typingUsers.length === 1 ? "is" : "are"} typing
-              </span>
-            )}
           </div>
+          {/* Compact connection icon */}
+          <ConnectToServer />
         </div>
 
         {/* Right Section */}
@@ -98,4 +90,4 @@ export default function ChatHeader({
       </div>
     </header>
   );
-}
+} 

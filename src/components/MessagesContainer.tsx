@@ -8,16 +8,27 @@ import '../App.css';
 interface MessagesContainerProps {
   messages: Message[];
   currentUsername: string;
+  currentUserId: string;
+  typingIndicators: Map<string, boolean>;
+  getUsernameById: (id: string) => string;
 }
 
 export default function MessagesContainer({
   messages,
-  currentUsername
+  currentUsername,
+  currentUserId,
+  typingIndicators,
+  getUsernameById
 }: MessagesContainerProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const [isUserNearBottom, setIsUserNearBottom] = useState<boolean>(true);
   const isScrollingProgrammatically = useRef<boolean>(false);
   const prevMessagesLength = useRef<number>(0);
+
+  // Get all users typing (excluding current user)
+  const typingUsers = Array.from(typingIndicators.entries())
+    .filter(([userId, isTyping]) => isTyping && userId !== currentUserId)
+    .map(([userId]) => getUsernameById(userId));
 
   // Check if user is near bottom
   const checkIfNearBottom = () => {
@@ -86,41 +97,64 @@ export default function MessagesContainer({
           </div>
         </div>
       ) : (
-        messages.map((msg) => {
-          const isCurrentUser = msg.sender === currentUsername;
-          const isSystem = msg.type === "system";
+        <>
+          {messages.map((msg) => {
+            const isCurrentUser = msg.sender === currentUsername;
+            const isSystem = msg.type === "system";
 
-          if (isSystem) {
+            if (isSystem) {
+              return (
+                <div key={msg.id} className="system-message">
+                  {msg.text}
+                </div>
+              );
+            }
+
             return (
-              <div key={msg.id} className="system-message">
-                {msg.text}
-              </div>
-            );
-          }
-
-          return (
-            <div
-              key={msg.id}
-              className={`message-wrapper ${
-                isCurrentUser ? "message-right" : "message-left"
-              }`}
-            >
-              {!isCurrentUser && (
-                <div className="message-sender">{msg.sender}</div>
-              )}
-
               <div
-                className={`message-bubble ${
-                  isCurrentUser ? "message-sent" : "message-received"
+                key={msg.id}
+                className={`message-wrapper ${
+                  isCurrentUser ? "message-right" : "message-left"
                 }`}
               >
-                {msg.text}
-              </div>
+                {!isCurrentUser && (
+                  <div className="message-sender">{msg.sender}</div>
+                )}
 
-              <div className="message-timestamp">{msg.timestamp}</div>
+                <div
+                  className={`message-bubble ${
+                    isCurrentUser ? "message-sent" : "message-received"
+                  }`}
+                >
+                  {msg.text}
+                </div>
+
+                <div className="message-timestamp">{msg.timestamp}</div>
+              </div>
+            );
+          })}
+
+          {/* Typing Indicator */}
+          {typingUsers.length > 0 && (
+            <div className="typing-indicator-container">
+              <div className="typing-indicator-bubble">
+                <span className="typing-user-names">
+                  {typingUsers.length === 1 
+                    ? `${typingUsers[0]} is typing` 
+                    : typingUsers.length === 2
+                    ? `${typingUsers[0]} and ${typingUsers[1]} are typing`
+                    : `${typingUsers.slice(0, -1).join(", ")}, and ${typingUsers[typingUsers.length - 1]} are typing`
+                  }
+                </span>
+                <div className="typing-dots">
+                  <span className="dot"></span>
+                  <span className="dot"></span>
+                  <span className="dot"></span>
+                </div>
+              </div>
             </div>
-          );
-        })
+          )}
+        </>
       )}
 
       {!isUserNearBottom && messages.length > 0 && (

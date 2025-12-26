@@ -4,8 +4,7 @@
 import { useState, useEffect, useRef } from "react";
 import type { Message } from "../types/Message";
 import type { User } from "../types/Users";
-
-const WEBSOCKET_URL = "ws://localhost:8080";
+import { useWebSocketConfig } from "../components/WebSocketConfig";
 
 export function useWebSocketChat() {
   // ---------------------------
@@ -28,6 +27,7 @@ export function useWebSocketChat() {
   );
   const [isUserNearBottom] = useState<boolean>(true);
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
+  const { websocketUrl } = useWebSocketConfig();
 
   // ---------------------------
   // Refs
@@ -37,12 +37,11 @@ export function useWebSocketChat() {
   const typingTimeoutRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
     new Map()
   );
-  //const messageIdsRef = useRef<Set<number>>(new Set());
-  //const isScrollingProgrammatically = useRef<boolean>(false);
-  //const scrollDebounceTimeout = useRef<ReturnType<typeof setTimeout> | null>(
-  //  null
-  //);
+  const myTypingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isConnecting = useRef<boolean>(false);
+  const reconnectAttempts = useRef<number>(0);
+  const maxReconnectAttempts = 5;
+  const hasInitializedUserId = useRef<boolean>(false);
 
   // ---------------------------
   // Helpers
@@ -62,8 +61,40 @@ export function useWebSocketChat() {
   };
 
   // ---------------------------
+  // Auto User ID Detection
+  // ---------------------------
+  const findNextAvailableUserId = (existingUsers: User[]): string => {
+    let userId = 1;
+    const existingIds = new Set(existingUsers.map(u => u.id));
+    
+    while (existingIds.has(userId.toString())) {
+      userId++;
+    }
+    
+    return userId.toString();
+  };
+
+  // ---------------------------
+  // Initialize User ID on First User List Received
+  // ---------------------------
+  useEffect(() => {
+    if (users.length > 0 && !hasInitializedUserId.current) {
+      const nextId = findNextAvailableUserId(users);
+      console.log(`Auto-detected next available user ID: ${nextId}`);
+      setCurrentUserId(nextId);
+      hasInitializedUserId.current = true;
+      
+      // Set toUserId to an existing user (preferably the first one)
+      if (users.length > 0) {
+        setToUserId(users[0].id);
+      }
+    }
+  }, [users]);
+
+  // ---------------------------
   // WebSocket Connection
   // ---------------------------
+  const { reconnectTrigger } = useWebSocketConfig();
 
   useEffect(() => {
     // Prevent multiple connections in React Strict Mode
@@ -72,22 +103,21 @@ export function useWebSocketChat() {
       return;
     }
 
-    isConnecting.current = true;
-
     if (ws.current?.readyState === WebSocket.OPEN) {
       console.log("WebSocket already open, skipping connection");
-      isConnecting.current = false;
       return;
     }
 
+    isConnecting.current = true;
     console.log(`Connecting to WebSocket as user ${currentUserId}...`);
     
-    const socket = new WebSocket(WEBSOCKET_URL);
+    const socket = new WebSocket(websocketUrl);
     setConnectionStatus("connecting");
 
     socket.onopen = () => {
       console.log("WebSocket connected successfully");
       setConnectionStatus("connected");
+      reconnectAttempts.current = 0;
 
       // Default users if none exist yet
       const defaultUsers = [
@@ -116,11 +146,22 @@ export function useWebSocketChat() {
         // User list sync from backend
         if (received.type === "user_list" && Array.isArray(received.users)) {
           console.log("Updating user list:", received.users);
-          setUsers(received.users.map((u: any) => ({
+          const updatedUsers = received.users.map((u: any) => ({
             id: String(u.id),
             username: u.username,
             online: u.online
-          })));
+          }));
+          
+          setUsers(updatedUsers);
+          
+          // Auto-select next available user for toUserId if current toUserId is not available
+          const currentToUser = updatedUsers.find((u: User) => u.id === toUserId);
+          if (!currentToUser || currentToUser.id === currentUserId) {
+            const availableUsers = updatedUsers.filter((u: User) => u.id !== currentUserId);
+            if (availableUsers.length > 0) {
+              setToUserId(availableUsers[0].id);
+            }
+          }
           return;
         }
 
@@ -142,8 +183,8 @@ export function useWebSocketChat() {
           return;
         }
 
-        // Typing
-        if (received.typing !== undefined) {
+        // Typing indicator - FIXED to match backend format
+        if (received.type === "typing" && received.typing !== undefined) {
           const fromId = String(received.from);
           const isTyping = received.typing === true;
 
@@ -197,6 +238,18 @@ export function useWebSocketChat() {
       console.log(`WebSocket closed - Code: ${event.code}, Reason: ${event.reason || 'None'}`);
       setConnectionStatus("disconnected");
       isConnecting.current = false;
+      
+      // Auto-reconnect logic (optional)
+      if (reconnectAttempts.current < maxReconnectAttempts) {
+        reconnectAttempts.current++;
+        console.log(`Attempting to reconnect (${reconnectAttempts.current}/${maxReconnectAttempts})...`);
+        setTimeout(() => {
+          if (!isConnecting.current && ws.current?.readyState !== WebSocket.OPEN) {
+            // Trigger reconnection by updating a dummy state
+            setConnectionStatus("connecting");
+          }
+        }, 2000 * reconnectAttempts.current);
+      }
     };
 
     socket.onerror = (error) => {
@@ -214,7 +267,7 @@ export function useWebSocketChat() {
         socket.close();
       }
     };
-  }, [currentUserId]); // Only reconnect when user changes
+  }, [currentUserId, websocketUrl, reconnectTrigger]);
 
   // ---------------------------
   // Sending messages
@@ -247,12 +300,36 @@ export function useWebSocketChat() {
     setText("");
   };
 
-  // Typing
+  // Typing with debounce - FIXED
   const handleTyping = () => {
     if (ws.current?.readyState !== WebSocket.OPEN) return;
+    
+    // Send typing = true
     ws.current.send(
-      JSON.stringify({ from: currentUserId, to: toUserId, typing: true })
+      JSON.stringify({ 
+        from: currentUserId, 
+        to: toUserId, 
+        typing: true 
+      })
     );
+
+    // Clear existing timeout
+    if (myTypingTimeoutRef.current) {
+      clearTimeout(myTypingTimeoutRef.current);
+    }
+
+    // Set new timeout to send typing = false after 1 second of inactivity
+    myTypingTimeoutRef.current = setTimeout(() => {
+      if (ws.current?.readyState === WebSocket.OPEN) {
+        ws.current.send(
+          JSON.stringify({ 
+            from: currentUserId, 
+            to: toUserId, 
+            typing: false 
+          })
+        );
+      }
+    }, 1000);
   };
 
   // ---------------------------
@@ -272,6 +349,9 @@ export function useWebSocketChat() {
         newUser: newUser
       }));
     }
+
+    // Automatically set the new user as the chat recipient
+    setToUserId(newId);
 
     setNewUsername("");
     setShowAddUserModal(false);
@@ -339,7 +419,7 @@ export function useWebSocketChat() {
   }, []);
 
   // ---------------------------
-  // Return full chat API
+  // Return full chat API + WebSocket
   // ---------------------------
   return {
     messages,
@@ -357,6 +437,7 @@ export function useWebSocketChat() {
     connectionStatus,
     isUserNearBottom,
     listRef,
+    ws: ws.current, // Export WebSocket instance for call component
 
     // actions
     setText,

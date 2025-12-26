@@ -1,6 +1,6 @@
 // components/EditUserModal.tsx
-// Modal for editing a user's username
 import '../App.css';
+import { useEffect, useRef } from 'react';
 
 interface EditUserModalProps {
   showEditModal: boolean;
@@ -17,6 +17,16 @@ export default function EditUserModal({
   setEditUsername,
   handleSaveEdit
 }: EditUserModalProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Auto-focus when modal opens
+  useEffect(() => {
+    if (showEditModal && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [showEditModal]);
+
   if (!showEditModal) return null;
 
   return (
@@ -28,6 +38,7 @@ export default function EditUserModal({
           <button
             onClick={() => setShowEditModal(false)}
             className="modal-close"
+            aria-label="Close modal"
           >
             ×
           </button>
@@ -36,13 +47,14 @@ export default function EditUserModal({
         {/* Body */}
         <div className="modal-body">
           <input
+            ref={inputRef}
             type="text"
             value={editUsername}
             onChange={(e) => setEditUsername(e.target.value)}
             onKeyPress={(e) => e.key === "Enter" && handleSaveEdit()}
             placeholder="Enter new username..."
             className="username-input"
-            autoFocus
+            aria-label="Username input"
           />
 
           <div className="modal-actions">
