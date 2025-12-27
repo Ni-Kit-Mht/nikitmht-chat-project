@@ -14,7 +14,7 @@ const WebSocketContext = createContext<WebSocketContextType | undefined>(
 export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
-  const [websocketUrl, setWebsocketUrl] = useState("wss://olympics-climbing-algebra-workstation.trycloudflare.com");
+  const [websocketUrl, setWebsocketUrl] = useState("wss://unlimited-virtual-dts-minimum.trycloudflare.com");
   const [reconnectTrigger, setReconnectTrigger] = useState(0); // Add reconnect trigger state
 
   // Function to manually trigger a reconnection

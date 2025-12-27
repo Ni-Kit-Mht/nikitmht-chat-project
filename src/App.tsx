@@ -1,7 +1,7 @@
 // App.tsx
-// Root container with view switching and call notifications
+// Simple root container - ONLY handles view switching between chat and call
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import ChatHeader from "./components/ChatHeader";
 import MessagesContainer from "./components/MessagesContainer";
 import MessageInput from "./components/MessageInput";
@@ -14,34 +14,17 @@ import './index.css';
 
 type ViewMode = 'chat' | 'call';
 
-interface CallState {
-  callId: string | null;
-  status: 'idle' | 'calling' | 'incoming' | 'active' | 'ending' | 'reconnecting';
-  callType: 'audio' | 'video';
-  remoteUserId: string | null;
-  remoteUsername: string | null;
-}
-
 function App() {
   const chat = useWebSocketChat();
   const [viewMode, setViewMode] = useState<ViewMode>('chat');
-  const [hasIncomingCall, setHasIncomingCall] = useState(false);
   const [unreadMessages, setUnreadMessages] = useState(0);
-  const [callState, setCallState] = useState<CallState>({
-    callId: null,
-    status: 'idle',
-    callType: 'video',
-    remoteUserId: null,
-    remoteUsername: null,
-  });
-  
-  // Store call state in ref to use in WebSocket handler
-  const callStateRef = useRef(callState);
-  useEffect(() => {
-    callStateRef.current = callState;
-  }, [callState]);
+  const [hasIncomingCall, setHasIncomingCall] = useState(false);
+  const [incomingCallInfo, setIncomingCallInfo] = useState<{
+    from: string;
+    callType: 'audio' | 'video';
+  } | null>(null);
 
-  // Listen for incoming calls and call-related messages
+  // Listen ONLY for incoming call notifications to show badge
   useEffect(() => {
     const ws = chat.ws;
     if (!ws) return;
@@ -50,57 +33,24 @@ function App() {
       try {
         const data = JSON.parse(event.data);
         
-        // Detect incoming call
+        // Track incoming calls for notification badge
         if (data.type === 'call_incoming') {
+          console.log('📞 App.tsx - Incoming call detected (for notification only)');
           setHasIncomingCall(true);
-          setCallState({
-            callId: data.callId,
-            status: 'incoming',
-            callType: data.callType,
-            remoteUserId: data.from,
-            remoteUsername: data.fromUsername,
-          });
-          
-          // Auto-switch to call view if not already there
-          // if (viewMode === 'chat') {
-          //   // Optional: Auto-switch or just show notification
-          //   // setViewMode('call');
-          // }
-        }
-        
-        // Reset incoming call flag when call ends
-        if (data.type === 'call_ended' || data.type === 'call_rejected' || data.type === 'call_error') {
-          setHasIncomingCall(false);
-          setCallState(prev => ({
-            ...prev,
-            status: 'idle',
-            callId: null,
-            remoteUserId: null,
-            remoteUsername: null,
-          }));
-        }
-        
-        // Handle call answered
-        if (data.type === 'call_answered') {
-          setHasIncomingCall(false);
-          setCallState(prev => ({
-            ...prev,
-            status: 'active',
-          }));
-        }
-
-        // Handle call initiation response
-        if (data.type === 'call_initiated') {
-          setCallState({
-            callId: data.callId,
-            status: 'calling',
-            callType: data.callType,
-            remoteUserId: data.to,
-            remoteUsername: data.toUsername,
+          setIncomingCallInfo({
+            from: data.fromUsername,
+            callType: data.callType
           });
         }
-
-        // Track unread messages when in call view
+        
+        // Clear notification when call ends
+        if (data.type === 'call_ended' || data.type === 'call_rejected') {
+          console.log('🔴 App.tsx - Call ended (clearing notification)');
+          setHasIncomingCall(false);
+          setIncomingCallInfo(null);
+        }
+        
+        // Track unread chat messages when in call view
         if (data.text && data.from && viewMode === 'call') {
           setUnreadMessages(prev => prev + 1);
         }
@@ -116,32 +66,18 @@ function App() {
     };
   }, [chat.ws, viewMode]);
 
-  // Clear unread when switching to chat
+  // Handle view switching
   const handleViewChange = (mode: ViewMode) => {
+    console.log(`🔄 Switching view to: ${mode}`);
     setViewMode(mode);
+    
     if (mode === 'chat') {
       setUnreadMessages(0);
     }
+    
     if (mode === 'call') {
-      setHasIncomingCall(false);
+      // Don't clear hasIncomingCall here - let CallUsersComponent handle the actual call
     }
-  };
-
-  // Function to update call state from child components
-  const updateCallState = (newState: Partial<CallState>) => {
-    setCallState(prev => ({ ...prev, ...newState }));
-  };
-
-  // Reset call state completely
-  const resetCallState = () => {
-    setCallState({
-      callId: null,
-      status: 'idle',
-      callType: 'video',
-      remoteUserId: null,
-      remoteUsername: null,
-    });
-    setHasIncomingCall(false);
   };
 
   return (
@@ -158,7 +94,7 @@ function App() {
           )}
         </button>
         <button
-          className={`toggle-btn ${viewMode === 'call' ? 'active' : ''} ${hasIncomingCall ? 'incoming-call-pulse' : ''}`}
+          className={`toggle-btn ${viewMode === 'call' ? 'active' : ''} ${hasIncomingCall && viewMode === 'chat' ? 'incoming-call-pulse' : ''}`}
           onClick={() => handleViewChange('call')}
         >
           📞 Calls
@@ -184,17 +120,15 @@ function App() {
           <EditUserModal {...chat} />
           
           {/* Show incoming call notification in chat view */}
-          {callState.status === 'incoming' && (
+          {hasIncomingCall && incomingCallInfo && (
             <div className="incoming-call-notification">
               <div className="notification-content">
-                <p>📞 Incoming call from {callState.remoteUsername}</p>
+                <p>📞 Incoming {incomingCallInfo.callType} call from {incomingCallInfo.from}</p>
                 <button 
                   className="btn-switch-to-call"
-                  onClick={() => {
-                    handleViewChange('call');
-                  }}
+                  onClick={() => handleViewChange('call')}
                 >
-                  Answer Call
+                  Go to Calls
                 </button>
               </div>
             </div>
@@ -202,17 +136,17 @@ function App() {
         </div>
       ) : (
         <div className="call-view">
-          {/* Pass the shared WebSocket, state, and call state to CallUsersComponent */}
+          {/* CallUsersComponent manages ALL call state internally */}
           <CallUsersComponent 
             ws={chat.ws}
             currentUserId={chat.currentUserId}
-            users={(chat.users ?? []).map(u => ({ id: u.id, username: u.username, online: !!u.online }))}
+            users={(chat.users ?? []).map(u => ({ 
+              id: u.id, 
+              username: u.username, 
+              online: !!u.online 
+            }))}
             setCurrentUserId={chat.setCurrentUserId}
             connectionStatus={chat.connectionStatus}
-            // Pass call state and handlers
-            callState={callState}
-            updateCallState={updateCallState}
-            resetCallState={resetCallState}
           />
         </div>
       )}
